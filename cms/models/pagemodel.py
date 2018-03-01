@@ -206,34 +206,39 @@ class Page(six.with_metaclass(PageMetaClass, MP_Node)):
         check_title_slugs, overwrite_url on the moved page don't need any check
         as it remains the same regardless of the page position in the tree
         """
-        assert self.publisher_is_draft
-        assert target.publisher_is_draft
+
+        # There is *NO* system to manage:
+        #       draft, published, or language trees separately,
+        #   We need to move all of them!!!
+        # ----------------------------
+        # Inputs are:
+        # self - page being moved
+        # target - page to move relative to
+        # position - relative position:
+        #   right = move self below target (sibling or root)
+        #   left = move self above target  (sibling or root)
+        #   first-child = move self to first child of target
+        #   last-child = make self the last child of target
+        # ----------------------------
+
+        # This is required to test that we are moving pages to/from the same published level
+        assert self.publisher_is_draft == target.publisher_is_draft
+
         # do not mark the page as dirty after page moves
         self._publisher_keep_state = True
 
-        is_inherited_template = (
-            self.template == constants.TEMPLATE_INHERITANCE_MAGIC)
+        # Get the public versions of the page (i.e. if draft, get published versions)
+        self_public_page = None
+        if self.publisher_public_id and self.publisher_is_draft:
+            self_public_page = Page.objects.get(pk=self.publisher_public_id)
+
         target_public_page = None
+        if target.publisher_public_id and target.publisher_is_draft:
+            target_public_page = Page.objects.get(pk=target.publisher_public_id)
 
+        # Root level nodes need to explicitly set the template if inherited
+        is_inherited_template = (self.template == constants.TEMPLATE_INHERITANCE_MAGIC)
         if position in ('left', 'right') and not target.parent:
-            # make sure move_page does not break the tree
-            # when moving to a top level position.
-
-            if position == 'right' and target.publisher_public_id:
-                # The correct path order for pages at the root level
-                # is that any left sibling page has a path
-                # lower than the path of the current page.
-                # This rule applies to both draft and live pages
-                # so this condition will make sure to add the
-                # current page to the right of the target live page.
-                target_public_page = Page.objects.get(pk=target.publisher_public_id)
-                draft_root = target.get_root()
-                public_root = target_public_page.get_root()
-
-                # With this assert we can detect tree corruptions.
-                # It's important to raise this!
-                assert draft_root.get_next_sibling() == public_root
-
             if is_inherited_template:
                 # The following code resolves the inherited template
                 # and sets it on the moved page.
@@ -241,19 +246,19 @@ class Page(six.with_metaclass(PageMetaClass, MP_Node)):
                 # position and so can't inherit from anything.
                 self.template = self.get_template()
 
+        # Set the new parent id:
         if position == 'first-child' or position == 'last-child':
+            # explicitly if a child
             self.parent_id = target.pk
         else:
+            # implied if a sibling / root
             self.parent_id = target.parent_id
 
+        # Save and move!
         self.save()
+        moved_page = self.move(target, pos=position)
 
-        if target_public_page:
-            moved_page = self.move(target_public_page, pos=position)
-        else:
-            moved_page = self.move(target, pos=position)
-
-        # fire signal
+        # fire moved_page signal
         import cms.signals as cms_signals
         cms_signals.page_moved.send(sender=Page, instance=moved_page)
 
@@ -263,62 +268,59 @@ class Page(six.with_metaclass(PageMetaClass, MP_Node)):
         # Make sure to update the slug and path of the target page.
         page_utils.check_title_slugs(target)
 
-        if target_public_page:
-             page_utils.check_title_slugs(target)
-
-        if moved_page.publisher_public_id:
-            # Ensure we have up to date mptt properties
-            public_page = Page.objects.get(pk=moved_page.publisher_public_id)
-            # Ensure that the page is in the right position and save it
-            public_page = moved_page._publisher_save_public(public_page)
-            cms_signals.page_moved.send(sender=Page, instance=public_page)
-
-            page_utils.check_title_slugs(public_page)
-
-        # Update the descendants to "PENDING"
-        # If the target (parent) page is not published
-        # and the page being moved is published.
+        # Get titles that have been moved
         titles = (
             moved_page
-            .title_set
-            .filter(language__in=moved_page.get_languages())
-            .values_list('language', 'published')
+                .title_set
+                .values_list('language', 'published')
         )
 
+        # Get all title's languages/published from the parent page
         if moved_page.parent_id:
             parent_titles = (
                 moved_page
-                .parent
-                .title_set
-                .exclude(publisher_state=PUBLISHER_STATE_PENDING)
-                .values_list('language', 'published')
+                    .parent
+                    .title_set
+                    .exclude(publisher_state=PUBLISHER_STATE_PENDING)
+                    .values_list('language', 'published')
             )
             parent_titles_by_language = dict(parent_titles)
         else:
             parent_titles_by_language = {}
 
-        for language, published in titles:
+        # Update the descendants to "PENDING" if the target (parent) page is NOT published
+        # and the page being moved IS published.
+        for language, moved_is_published in titles:
             if moved_page.parent_id:
                 parent_is_published = parent_titles_by_language.get(language)
-
-                if parent_is_published and published:
-                    # this looks redundant but it's necessary
-                    # for all the descendants of the page being
-                    # moved to be set to the correct state.
-                    moved_page.mark_as_published(language)
-                    moved_page.mark_descendants_as_published(language)
-                elif published:
-                    # page is published but it's parent is not
+                if not parent_is_published and moved_is_published:
+                     # page is published but its parent is not
                     # mark the page being moved (source) as "pending"
                     moved_page.mark_as_pending(language)
                     # mark all descendants of source as "pending"
                     moved_page.mark_descendants_pending(language)
-            elif published:
-                moved_page.mark_as_published(language)
-                moved_page.mark_descendants_as_published(language)
+
+        # TODO Here is an issue/possible workaround: 
+        # ----------------------------
+        # The moved page is published and set as the child of an unpublished target page
+        #  so we would have:
+        #   - publisher_is_draft paths being correct
+        #   - the published version of the moved page with incorrect path
+        # Awful workaround -
+        #   - set the moved page public path to the same as the draft...
+        # ----------------------------
+        # if self_public_page and moved_page.parent_id:
+        #     parent_page = moved_page.parent
+        #     if not parent_page.publisher_public_id and not target_public_page:
+        #         self_public_page
+
+        # Recursively call this function for public versions if both exist
+        if self_public_page and target_public_page:
+            self_public_page.move_page(target=target_public_page, position=position)
 
         from cms.cache import invalidate_cms_page_cache
         invalidate_cms_page_cache()
+
         return moved_page
 
     def _copy_titles(self, target, language, published):
