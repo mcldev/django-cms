@@ -37,6 +37,7 @@ classes that extend ``cms.toolbar_base.CMSToolbar`` and are registered using :me
 The register function can be used as a decorator.
 
 These classes have four attributes:
+
 * ``toolbar`` (the toolbar object)
 * ``request`` (the current request)
 * ``is_current_app`` (a flag indicating whether the current request is handled by the same app as the function is in)
@@ -75,10 +76,6 @@ A simple example, registering a class that does nothing::
         def request_hook(self):
             pass
 
-
-.. note:: Up to version 3.1 the module was named ``cms_toolbar.py``. Please
-          update your existing modules to the new naming convention.
-          Support for the old name will be removed in version 3.4.
 
 .. warning::
 

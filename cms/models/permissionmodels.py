@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import django
 from django.apps import apps
 from django.db import models
 from django.conf import settings
@@ -55,8 +56,20 @@ class AbstractPagePermission(models.Model):
     """
 
     # who:
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("user"), blank=True, null=True)
-    group = models.ForeignKey(Group, verbose_name=_("group"), blank=True, null=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        verbose_name=_("user"),
+        blank=True,
+        null=True,
+    )
+    group = models.ForeignKey(
+        Group,
+        on_delete=models.CASCADE,
+        verbose_name=_("group"),
+        blank=True,
+        null=True,
+    )
 
     # what:
     can_change = models.BooleanField(_("can edit"), default=True)
@@ -197,7 +210,7 @@ class PagePermission(AbstractPagePermission):
     """Page permissions for single page
     """
     grant_on = models.IntegerField(_("Grant on"), choices=ACCESS_CHOICES, default=ACCESS_PAGE_AND_DESCENDANTS)
-    page = models.ForeignKey(Page, null=True, blank=True, verbose_name=_("page"))
+    page = models.ForeignKey(Page, on_delete=models.CASCADE, null=True, blank=True, verbose_name=_("page"))
 
     objects = PagePermissionManager()
 
@@ -248,7 +261,7 @@ class PageUserManager(UserManager):
 class PageUser(User):
     """Cms specific user data, required for permission system
     """
-    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="created_users")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="created_users")
 
     objects = PageUserManager()
 
@@ -261,12 +274,14 @@ class PageUser(User):
 class PageUserGroup(Group):
     """Cms specific group data, required for permission system
     """
-    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="created_usergroups")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="created_usergroups")
 
     class Meta:
         verbose_name = _('User group (page)')
         verbose_name_plural = _('User groups (page)')
         app_label = 'cms'
+        if (1, 10) <= django.VERSION < (2, 0):
+            manager_inheritance_from_future = True
 
 
 reversion_register(PagePermission)

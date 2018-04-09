@@ -181,8 +181,8 @@ class CMSPlugin(six.with_metaclass(PluginModelBase, MP_Node)):
     2. Subclasses of CMSPlugin cannot define a "text" field.
 
     '''
-    placeholder = models.ForeignKey(Placeholder, editable=False, null=True)
-    parent = models.ForeignKey('self', blank=True, null=True, editable=False)
+    placeholder = models.ForeignKey(Placeholder, on_delete=models.CASCADE, editable=False, null=True)
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, blank=True, null=True, editable=False)
     position = models.PositiveSmallIntegerField(_("position"), default = 0, editable=False)
     language = models.CharField(_("language"), max_length=15, blank=False, db_index=True, editable=False)
     plugin_type = models.CharField(_("plugin_name"), max_length=50, db_index=True, editable=False)
@@ -304,7 +304,9 @@ class CMSPlugin(six.with_metaclass(PluginModelBase, MP_Node)):
         warnings.warn(
             "Don't use the page attribute on CMSPlugins! CMSPlugins are not "
             "guaranteed to have a page associated with them!",
-            DontUsePageAttributeWarning)
+            DontUsePageAttributeWarning,
+            stacklevel=2,
+        )
         return self.placeholder.page if self.placeholder_id else None
 
     def get_instance_icon_src(self):
