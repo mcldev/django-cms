@@ -84,6 +84,10 @@ class BaseToolbar(ToolbarAPIMixin):
         return self.structure_mode_active or self.content_mode_active
 
     @cached_property
+    def edit_mode(self):
+        return self.edit_mode_active
+
+    @cached_property
     def content_mode_active(self):
         if self.structure_mode_active:
             # Structure mode always takes precedence
